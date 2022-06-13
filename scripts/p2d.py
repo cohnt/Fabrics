@@ -7,13 +7,6 @@ import matplotlib.pyplot as plt
 # from jax.config import config
 # config.update("jax_debug_nans", True)
 
-goal = np.array([-5, 0])
-x = np.array([5.5, 0])
-x_dot = np.array([0, 0])
-
-obs_origin = np.array([0, 0])
-obs_r = 1.
-
 def jvp(f, x, u):
 	return jacfwd(lambda t : f(x + t*u))(0.0)
 
@@ -82,4 +75,29 @@ def fabric_solve(theta, theta_dot):
 
 	return np.linalg.pinv(Mr) @ fr
 
-print(fabric_solve(x, x_dot))
+# print(fabric_solve(x, x_dot))
+
+# x = np.array([5.5, 0.1])
+# x_dot = np.array([-10., 0.])
+
+# print(fabric_solve(x, x_dot))
+
+goal = np.array([-5, 0])
+x = np.array([5.5, 0.1])
+x_dot = np.array([0, 0])
+
+obs_origin = np.array([0, 0])
+obs_r = 1.
+
+dt = 0.001
+fig, ax = plt.subplots()
+i = 0
+while True:
+	i += 1
+	x_dot_dot = fabric_solve(x, x_dot)
+	x = x + (x_dot * dt)
+	x_dot = x_dot + (x_dot_dot * dt)
+	if i % 10 == 0:
+		ax.scatter([x[0]], [x[1]], color="black")
+		plt.draw()
+		plt.pause(0.001)
