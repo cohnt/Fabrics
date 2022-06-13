@@ -1,5 +1,5 @@
 import jax.numpy as np
-from jax import jacfwd, grad
+from jax import jacfwd, grad, jit
 import matplotlib.pyplot as plt
 
 # Directly trying to replicate Alphonsus' point mass code in Python
@@ -39,6 +39,7 @@ def repeller_fabric(x, x_dot):
 	x_dot_dot = -s * x_dot**2 * dx
 	return (M, x_dot_dot)
 
+@jit
 def fabric_solve(theta, theta_dot):
 	xs = []
 	x_dots = []
@@ -97,7 +98,7 @@ while True:
 	x_dot_dot = fabric_solve(x, x_dot)
 	x = x + (x_dot * dt)
 	x_dot = x_dot + (x_dot_dot * dt)
-	if i % 10 == 0:
+	if i % 25 == 0:
 		ax.scatter([x[0]], [x[1]], color="black")
 		plt.draw()
 		plt.pause(0.001)
