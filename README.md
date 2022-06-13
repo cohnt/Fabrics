@@ -1,0 +1,1 @@
+A repository where I'm putting my work as I try to understand RMPs and geometric fabrics.
