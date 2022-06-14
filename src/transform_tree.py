@@ -1,5 +1,6 @@
 import jax.numpy as np
 from jax import jacfwd, grad, jit
+from functools import partial
 
 def jvp(f, x, u):
 	return jacfwd(lambda t : f(x + t*u))(0.0)
@@ -66,7 +67,7 @@ class TransformTreeNode():
 	def resolve(self):
 		return np.linalg.pinv(self.M) @ self.x_dot_dot
 
-	@jit
+	@partial(jit, static_argnums=(0,))
 	def solve(self, x, x_dot):
 		self.x = x
 		self.x_dot = x_dot
