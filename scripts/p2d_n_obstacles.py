@@ -41,7 +41,7 @@ def repeller_task_map(theta):
 	return np.array([np.linalg.norm(theta - obs_origin) / obs_r - 1.0 for obs_origin, obs_r in zip(obs_origins, obs_rs)])
 
 def repeller_fabric(x, x_dot):
-	k_beta = 20.
+	k_beta = 0.01
 	alpha_beta = 1.
 	s = (x_dot < 0).astype(float)
 	M = np.diag(k_beta * np.divide(s, x**2))
@@ -52,16 +52,12 @@ def repeller_fabric(x, x_dot):
 
 repeller_node = TransformTreeNode(parent=root, psi=repeller_task_map, fabric=repeller_fabric, space_dim=1)
 
-inits = np.array([
-	[5.5, -3],
-	[5.5, -2],
-	[5.5, -1],
-	[5.5, 0],
-	[5.5, 1],
-	[5.5, 2],
-	[5.5, 3],
-	[5.5, 4]
-])
+ys = np.linspace(-5, 5, 20)
+xs = np.full(ys.shape, 5.5)
+
+inits = np.vstack((
+	xs, ys
+)).T
 
 dist_thresh = 0.01
 vel_thresh = 0.01
