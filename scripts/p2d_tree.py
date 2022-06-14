@@ -56,18 +56,23 @@ goal = np.array([-5, 0])
 x = np.array([5.5, 0.1])
 x_dot = np.array([0, 0])
 
+dist_thresh = 0.01
+vel_thresh = 0.01
+
 obs_origin = np.array([0, 0])
 obs_r = 1.
 
 dt = 0.001
-fig, ax = plt.subplots()
-i = 0
-while True:
-	i += 1
+xs = []
+for i in range(10000):
 	x_dot_dot = root.solve(x, x_dot)
 	x = x + (x_dot * dt)
 	x_dot = x_dot + (x_dot_dot * dt)
-	if i % 25 == 0:
-		ax.scatter([x[0]], [x[1]], color="black")
-		plt.draw()
-		plt.pause(0.001)
+	xs.append(x)
+
+	if np.linalg.norm(x - goal) < dist_thresh and np.linalg.norm(x_dot) < vel_thresh:
+		break
+
+xs = np.asarray(xs)
+plt.scatter(xs[:,0], xs[:,1], c=np.linspace(0, 1, len(xs)), cmap=plt.get_cmap("viridis"))
+plt.show()
