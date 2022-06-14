@@ -1,9 +1,6 @@
 import jax.numpy as np
-from jax import jacfwd, grad, jit
+from jax import jacfwd, grad, jit, jvp
 from functools import partial
-
-def jvp(f, x, u):
-	return jacfwd(lambda t : f(x + t*u))(0.0)
 
 class TransformTreeNode():
 	def __init__(self, parent, psi, fabric, space_dim):
@@ -44,7 +41,7 @@ class TransformTreeNode():
 
 	def backward_pass(self):
 		if self.is_leaf:
-			self.c = jvp(lambda s : jvp(self.psi, s, self.parent.x_dot), self.parent.x, self.parent.x_dot)
+			self.c = jvp(lambda s : jvp(self.psi, (s,), (self.parent.x_dot,))[1], (self.parent.x,), (self.parent.x_dot,))[1]
 			self.J = jacfwd(self.psi)(self.parent.x)
 		else:
 			for child in self.children:
@@ -54,7 +51,7 @@ class TransformTreeNode():
 	def pushforward(self):
 		for child in self.children:
 			child.x = child.psi(self.x)
-			child.x_dot = jvp(child.psi, self.x, self.x_dot)
+			child.x_dot = jvp(child.psi, (self.x,), (self.x_dot,))[1]
 
 	def pullback(self):
 		self.M = np.sum(np.array([
