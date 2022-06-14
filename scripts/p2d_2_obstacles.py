@@ -37,7 +37,14 @@ def attractor_fabric(x, x_dot):
 
 attractor_node = TransformTreeNode(parent=root, psi=attractor_task_map, fabric=attractor_fabric, space_dim=2)
 
-def repeller_task_map(theta):
+def repeller_task_map_1(theta):
+	obs_origin = obs_origins[0]
+	obs_r = obs_rs[0]
+	return np.array([np.linalg.norm(theta - obs_origin) / obs_r - 1.0])
+
+def repeller_task_map_2(theta):
+	obs_origin = obs_origins[1]
+	obs_r = obs_rs[1]
 	return np.array([np.linalg.norm(theta - obs_origin) / obs_r - 1.0])
 
 def repeller_fabric(x, x_dot):
@@ -50,42 +57,46 @@ def repeller_fabric(x, x_dot):
 	x_dot_dot = -s * x_dot**2 * dx
 	return (M, x_dot_dot)
 
-repeller_node = TransformTreeNode(parent=root, psi=repeller_task_map, fabric=repeller_fabric, space_dim=1)
+repeller_node_1 = TransformTreeNode(parent=root, psi=repeller_task_map_1, fabric=repeller_fabric, space_dim=1)
+repeller_node_2 = TransformTreeNode(parent=root, psi=repeller_task_map_2, fabric=repeller_fabric, space_dim=1)
 
 inits = np.array([
+	[5.5, -3],
+	[5.5, -2],
 	[5.5, -1],
-	[5.5, -0.75],
-	[5.5, -0.5],
-	[5.5, -0.25],
-	[5.5, -0.01],
-	[5.5, 0.01],
-	[5.5, 0.25],
-	[5.5, 0.5],
-	[5.5, 0.75],
-	[5.5, 1]
+	[5.5, 0],
+	[5.5, 1],
+	[5.5, 2],
+	[5.5, 3],
+	[5.5, 4]
 ])
 
 dist_thresh = 0.01
 vel_thresh = 0.01
 goal = np.array([-5, 0])
-obs_origin = np.array([0, 0])
-obs_r = 1.
-dt = 0.001
+obs_origins = np.array([
+	[0, 0],
+	[2, 2]
+])
+obs_rs = [0.75, 0.75]
+dt = 0.01
 
 fig, ax = plt.subplots()
-obs_element = plt.Circle(tuple(obs_origin), obs_r, color='black')
-ax.add_patch(obs_element)
+
+for obs_origin, obs_r in zip(obs_origins, obs_rs):
+	obs_element = plt.Circle(tuple(obs_origin), obs_r, color='black')
+	ax.add_patch(obs_element)
 
 ax.set_aspect("equal")
 plt.draw()
 plt.pause(0.001)
 
-matplotlib_downsample = 250
+matplotlib_downsample = 10
 
 for x in inits:
 	x_dot = np.array([0, 0])
 	xs = []
-	for i in range(100000):
+	for i in range(10000):
 		x_dot_dot = root.solve(x, x_dot)
 		x = x + (x_dot * dt)
 		x_dot = x_dot + (x_dot_dot * dt)
