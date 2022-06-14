@@ -72,7 +72,13 @@ obs_origin = np.array([0, 0])
 obs_r = 1.
 dt = 0.001
 
-def fabric_path(x):
+fig, ax = plt.subplots()
+obs_element = plt.Circle(tuple(obs_origin), obs_r, color='black')
+ax.add_patch(obs_element)
+
+matplotlib_downsample = 250
+
+for x in inits:
 	x_dot = np.array([0, 0])
 	xs = []
 	for i in range(100000):
@@ -84,12 +90,12 @@ def fabric_path(x):
 		if np.linalg.norm(x - goal) < dist_thresh and np.linalg.norm(x_dot) < vel_thresh:
 			break
 	xs = np.asarray(xs)
-	return xs
+	
+	# ax.scatter(xs[::matplotlib_downsample,0], xs[::matplotlib_downsample,1], c=np.linspace(0, 1, len(xs[::matplotlib_downsample])), cmap=plt.get_cmap("viridis"))
+	ax.plot(xs[::matplotlib_downsample,0], xs[::matplotlib_downsample,1])
+	ax.set_aspect("equal")
+	plt.draw()
+	plt.pause(0.001)
 
-xss = [fabric_path(x_init) for x_init in inits]
-
-for xs in xss:
-	# plt.scatter(xs[:,0], xs[:,1], c=np.linspace(0, 1, len(xs)), cmap=plt.get_cmap("viridis"))
-	plt.plot(xs[:,0], xs[:,1])
-
+ax.set_aspect("equal")
 plt.show()
