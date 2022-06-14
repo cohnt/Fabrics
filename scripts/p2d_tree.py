@@ -23,7 +23,7 @@ def attractor_task_map(theta):
 	return theta - goal
 
 def attractor_fabric(x, x_dot):
-	k = 150.
+	k = 10.
 	alpha_psi = 10.
 	beta = 10.5
 	m_up = 2.0
@@ -41,8 +41,8 @@ def repeller_task_map(theta):
 	return np.array([np.linalg.norm(theta - obs_origin) / obs_r - 1.0])
 
 def repeller_fabric(x, x_dot):
-	k_beta = 75.
-	alpha_beta = 50.
+	k_beta = 20.
+	alpha_beta = 1.
 	s = (x_dot < 0).astype(float)
 	M = np.diag(k_beta * np.divide(s, x**2))
 	psi = lambda theta : np.divide(alpha_beta, (2 * (theta**8)))
@@ -64,7 +64,6 @@ inits = np.array([
 	[5.5, 0.75],
 	[5.5, 1]
 ])
-xss = []
 
 dist_thresh = 0.01
 vel_thresh = 0.01
@@ -73,10 +72,10 @@ obs_origin = np.array([0, 0])
 obs_r = 1.
 dt = 0.001
 
-for x in inits:
+def fabric_path(x):
 	x_dot = np.array([0, 0])
 	xs = []
-	for i in range(10000):
+	for i in range(100000):
 		x_dot_dot = root.solve(x, x_dot)
 		x = x + (x_dot * dt)
 		x_dot = x_dot + (x_dot_dot * dt)
@@ -85,7 +84,9 @@ for x in inits:
 		if np.linalg.norm(x - goal) < dist_thresh and np.linalg.norm(x_dot) < vel_thresh:
 			break
 	xs = np.asarray(xs)
-	xss.append(xs)
+	return xs
+
+xss = [fabric_path(x_init) for x_init in inits]
 
 for xs in xss:
 	# plt.scatter(xs[:,0], xs[:,1], c=np.linspace(0, 1, len(xs)), cmap=plt.get_cmap("viridis"))
