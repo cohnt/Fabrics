@@ -94,7 +94,7 @@ plt.pause(0.001)
 matplotlib_downsample = 10
 
 for x in inits:
-	x_dot = np.array([0, 0])
+	x_dot = np.array([0., 0.])
 	xs = []
 	for i in range(10000):
 		x_dot_dot = root.solve(x, x_dot)
