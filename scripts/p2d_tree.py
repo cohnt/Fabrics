@@ -52,27 +52,43 @@ def repeller_fabric(x, x_dot):
 
 repeller_node = TransformTreeNode(parent=root, psi=repeller_task_map, fabric=repeller_fabric, space_dim=1)
 
-goal = np.array([-5, 0])
-x = np.array([5.5, 0.1])
-x_dot = np.array([0, 0])
+inits = np.array([
+	[5.5, -1],
+	[5.5, -0.75],
+	[5.5, -0.5],
+	[5.5, -0.25],
+	[5.5, -0.01],
+	[5.5, 0.01],
+	[5.5, 0.25],
+	[5.5, 0.5],
+	[5.5, 0.75],
+	[5.5, 1]
+])
+xss = []
 
 dist_thresh = 0.01
 vel_thresh = 0.01
-
+goal = np.array([-5, 0])
 obs_origin = np.array([0, 0])
 obs_r = 1.
-
 dt = 0.001
-xs = []
-for i in range(10000):
-	x_dot_dot = root.solve(x, x_dot)
-	x = x + (x_dot * dt)
-	x_dot = x_dot + (x_dot_dot * dt)
-	xs.append(x)
 
-	if np.linalg.norm(x - goal) < dist_thresh and np.linalg.norm(x_dot) < vel_thresh:
-		break
+for x in inits:
+	x_dot = np.array([0, 0])
+	xs = []
+	for i in range(10000):
+		x_dot_dot = root.solve(x, x_dot)
+		x = x + (x_dot * dt)
+		x_dot = x_dot + (x_dot_dot * dt)
+		xs.append(x)
 
-xs = np.asarray(xs)
-plt.scatter(xs[:,0], xs[:,1], c=np.linspace(0, 1, len(xs)), cmap=plt.get_cmap("viridis"))
+		if np.linalg.norm(x - goal) < dist_thresh and np.linalg.norm(x_dot) < vel_thresh:
+			break
+	xs = np.asarray(xs)
+	xss.append(xs)
+
+for xs in xss:
+	# plt.scatter(xs[:,0], xs[:,1], c=np.linspace(0, 1, len(xs)), cmap=plt.get_cmap("viridis"))
+	plt.plot(xs[:,0], xs[:,1])
+
 plt.show()
