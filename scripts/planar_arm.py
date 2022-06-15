@@ -9,6 +9,7 @@ sys.path.append(".")  #
 import jax.numpy as np
 from jax import jacfwd
 import matplotlib.pyplot as plt
+import time
 
 from src.transform_tree import TransformTreeNode
 import src.planar_arm_visualization as visualization
@@ -37,6 +38,7 @@ end_effector_path_downsample = 25
 fabric_dt = 0.01
 dist_thresh = 0.01
 vel_thresh = 0.01
+fabric_running = False
 
 def make_rotation_matrix(theta):
 	mat = np.array([
@@ -69,16 +71,18 @@ def update_display(ax):
 			c = highlighted_joint_color if selected_joint == i-1 else "black"
 			visualization.draw_joint(ax, point1, joint_disp_radius, joint_color=c)
 
-		if len(end_effector_path) > 0:
-			ax.plot(np.array(end_effector_path)[::end_effector_path_downsample,0], np.array(end_effector_path)[::end_effector_path_downsample,1], color="blue")
 
 		if goal_pos is not None:
 			ax.scatter([goal_pos[0]], [goal_pos[1]], c="blue")
 
+	if len(end_effector_path) > 0:
+		arr = np.array(end_effector_path)[::end_effector_path_downsample]
+		ax.plot(arr[:,0], arr[:,1], color="blue")
+
 	plt.draw()
 
 def handle_keypress(event):
-	global selected_joint, joint_angles, joints_vels
+	global selected_joint, joint_angles, joints_vels, fabric_running
 	if event.key == "left":
 		joint_angles = joint_angles.at[selected_joint].set(joint_angles[selected_joint] + keypress_angle_change)
 		record_endeffector_pose(joint_angles)
@@ -101,24 +105,38 @@ def handle_keypress(event):
 		if goal_pos is None:
 			print("Error: Choose a goal pose before running the fabric!")
 			return
+		elif fabric_running:
+			print("Error: fabric is already running!")
+			return
 		else:
+			fabric_running = True
 			print("Running fabric until convergence or a keypress is received.")
 			root = TransformTreeNode(parent=None, psi=None, fabric=None)
 			reach_node = TransformTreeNode(parent=root, psi=reach_task_map, fabric=reach_fabric)
 			while True:
+				times = []
 				for _ in range(100):
+					t0 = time.time()
 					joint_accel = root.solve(joint_angles, joints_vels)
+					times.append(time.time() - t0)
 					joint_angles = joint_angles + (joints_vels * fabric_dt)
 					joints_vels = joints_vels + (joint_accel * fabric_dt)
 					record_endeffector_pose(joint_angles)
 					if np.linalg.norm(get_endeffector_pose(joint_angles) - goal_pos) < dist_thresh and np.linalg.norm(joints_vels) < vel_thresh: break
+				t0 = time.time()
 				update_display(ax)
-				print(np.linalg.norm(get_endeffector_pose(joint_angles) - goal_pos))
-				print(np.linalg.norm(joints_vels))
+				print("Drawing time: %f ms" % ((time.time() - t0)*1000))
+				# print(np.linalg.norm(get_endeffector_pose(joint_angles) - goal_pos))
+				# print(np.linalg.norm(joints_vels))
+				print("Average fabric update rate: %f ms" % (np.mean(np.array(times))*1000))
 				if np.linalg.norm(get_endeffector_pose(joint_angles) - goal_pos) < dist_thresh and np.linalg.norm(joints_vels) < vel_thresh:
 					print("Goal reached!")
+					fabric_running = False
 					break
-				if plt.waitforbuttonpress(0.01): break
+				if plt.waitforbuttonpress(0.1):
+					print("Goal not reached!")
+					fabric_running = False
+					break
 
 def handle_click(event):
 	global goal_pos, num_ik_steps, end_effector_path
