@@ -17,7 +17,7 @@ from src.transform_tree import TransformTreeNode
 # from jax.config import config
 # config.update("jax_debug_nans", True)
 
-root = TransformTreeNode(parent=None, psi=None, fabric=None, space_dim=2)
+root = TransformTreeNode(parent=None, psi=None, fabric=None)
 
 def attractor_task_map(theta):
 	return theta - goal
@@ -35,7 +35,7 @@ def attractor_fabric(x, x_dot):
 	M = (m_up - m_down) * np.exp(-1 * (alpha_m * np.linalg.norm(x))**2) * np.eye(2) + m_down * np.eye(2)
 	return (M, x_dot_dot)
 
-attractor_node = TransformTreeNode(parent=root, psi=attractor_task_map, fabric=attractor_fabric, space_dim=2)
+attractor_node = TransformTreeNode(parent=root, psi=attractor_task_map, fabric=attractor_fabric)
 
 def repeller_task_map(theta):
 	return np.array([np.linalg.norm(theta - obs_origin) / obs_r - 1.0])
@@ -50,7 +50,7 @@ def repeller_fabric(x, x_dot):
 	x_dot_dot = -s * x_dot**2 * dx
 	return (M, x_dot_dot)
 
-repeller_node = TransformTreeNode(parent=root, psi=repeller_task_map, fabric=repeller_fabric, space_dim=1)
+repeller_node = TransformTreeNode(parent=root, psi=repeller_task_map, fabric=repeller_fabric)
 
 inits = np.array([
 	[5.5, -1],
@@ -67,8 +67,8 @@ inits = np.array([
 
 dist_thresh = 0.01
 vel_thresh = 0.01
-goal = np.array([-5, 0])
-obs_origin = np.array([0, 0])
+goal = np.array([-5, 0], dtype=float)
+obs_origin = np.array([0, 0], dtype=float)
 obs_r = 1.
 dt = 0.001
 
@@ -83,7 +83,7 @@ plt.pause(0.001)
 matplotlib_downsample = 250
 
 for x in inits:
-	x_dot = np.array([0, 0])
+	x_dot = np.array([0, 0], dtype=float)
 	xs = []
 	for i in range(100000):
 		x_dot_dot = root.solve(x, x_dot)

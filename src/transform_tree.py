@@ -3,18 +3,17 @@ from jax import jacfwd, grad, jit, jvp
 from functools import partial
 
 class TransformTreeNode():
-	def __init__(self, parent, psi, fabric, space_dim):
+	def __init__(self, parent, psi, fabric):
 		# parent is another TransformTreeNode, or None if this node is the root
 		# psi is a function mapping from the configuration space of the parent node to this node
 		# fabric is a function which maps x and x_dot to M and x_dot_dot (or None if not a leaf node)
-		# space_dim is the dimension of the configuration space
 		self.parent = parent
 		self.children = []
 		self.psi = psi
-		self.x = np.zeros(space_dim)
-		self.x_dot = np.zeros(space_dim)
-		self.M = np.zeros((space_dim, space_dim))
-		self.x_dot_dot = np.zeros(space_dim)
+		self.x = None
+		self.x_dot = None
+		self.M = None
+		self.x_dot_dot = None
 		self.c = None
 		self.J = None
 		
