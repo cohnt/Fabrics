@@ -7,12 +7,18 @@ sys.path.append(".")  #
 #######################
 
 import jax.numpy as np
-from jax import jacfwd
+from jax import jacfwd, jacrev, grad
+from jax.experimental.host_callback import id_print
 import matplotlib.pyplot as plt
 import time
 
 from src.transform_tree import TransformTreeNode
 import src.planar_arm_visualization as visualization
+from src.util import log1pexp
+
+from jax.config import config
+config.update("jax_debug_nans", True)
+# config.update("jax_enable_x64", True)
 
 arm_link_lengths = np.append(np.zeros(1), np.ones(10))*0.4
 joint_angles = np.zeros(len(arm_link_lengths) - 1)
@@ -39,6 +45,9 @@ fabric_dt = 0.01
 dist_thresh = 0.01
 vel_thresh = 0.01
 fabric_running = False
+joint_range_frac = 0.8 # 1. is -pi to pi
+
+fig_num = 0
 
 def make_rotation_matrix(theta):
 	mat = np.array([
@@ -59,7 +68,7 @@ def apply_fk(point, frame_idx, joint_angles):
 	return point
 
 def update_display(ax):
-	global end_effector_pos, end_effector_path
+	global end_effector_pos, end_effector_path, fig_num
 	visualization.reset_display(ax, axes_limits)
 
 	for i in range(0, num_links):
@@ -78,6 +87,12 @@ def update_display(ax):
 	if len(end_effector_path) > 0:
 		arr = np.array(end_effector_path)[::end_effector_path_downsample]
 		ax.plot(arr[:,0], arr[:,1], color="blue")
+
+	if fabric_running:
+		plt.savefig("fig%04d.png" % fig_num)
+		fig_num += 1
+	# else:
+	# 	plt.draw()
 
 	plt.draw()
 
@@ -111,11 +126,11 @@ def handle_keypress(event):
 		else:
 			fabric_running = True
 			print("Running fabric until convergence or a keypress is received.")
-			root = TransformTreeNode(parent=None, psi=None, fabric=None)
-			reach_node = TransformTreeNode(parent=root, psi=reach_task_map, fabric=reach_fabric)
+			root = create_fabric()
 			while True:
 				times = []
 				for _ in range(100):
+					print(joint_angles)
 					t0 = time.time()
 					joint_accel = root.solve(joint_angles, joints_vels)
 					times.append(time.time() - t0)
@@ -169,11 +184,47 @@ def reach_fabric(x, x_dot):
 	m_up = 2.0
 	m_down = 0.2
 	alpha_m = 0.75
-	psi = lambda theta : k * (np.linalg.norm(theta) + (1 / alpha_psi) * np.log(1 + np.exp(-2 * alpha_psi * np.linalg.norm(theta))))
+	psi = lambda theta : k * (np.linalg.norm(theta) + (1 / alpha_psi) * log1pexp(-2 * alpha_psi * np.linalg.norm(theta)))
 	dx = jacfwd(psi)(x)
 	x_dot_dot = -1 * dx - beta * x_dot
 	M = (m_up - m_down) * np.exp(-1 * (alpha_m * np.linalg.norm(x))**2) * np.eye(2) + m_down * np.eye(2)
 	return (M, x_dot_dot)
+
+def upper_joint_limits_task_map_template(theta, joint_idx):
+	upper_limit = joint_range_frac * np.pi
+	return np.array([upper_limit - theta[joint_idx]]) * 180. / np.pi
+
+def lower_joint_limits_task_map_template(theta, joint_idx):
+	lower_limit = -joint_range_frac * np.pi
+	return np.array([theta[joint_idx] - lower_limit]) * 180. / np.pi
+
+def joint_limits_fabric(x, x_dot):
+	a1, a2, a3, a4 = 0.4, 0.2, 20., 5.
+	l = 0.25
+	s = (x_dot < 0).astype(float)
+	M = np.array([s * l / x])
+	psi = lambda theta : (a1 / theta**2) + a2 * log1pexp(-a3 * (theta - a4))
+	dx = jacrev(psi)(x).reshape(1) # For some reason, dx is a 1x1 array. This is needed to fix the shape.
+	# Can't compute this derivative with automatic differentiation, since you get catastrophic cancellation!
+	# See:
+	# https://jax.readthedocs.io/en/latest/notebooks/Custom_derivative_rules_for_Python_code.html#numerical-stability
+	# Instead, compute manually with wolfram alpha:
+	# https://www.wolframalpha.com/input?i=derivative+of+%28a%2Fx%5E2%29+%2B+b*log%28exp%28-c*%28x-d%29%29%2B1%29+with+respect+to+x
+	# dpsi = lambda theta : ((-2*a1) / theta**3) - (a2 * a3 / (1 + np.exp(a3 * (theta - a4))))
+	# dx = dpsi(x)
+	x_dot_dot = M @ dx
+	return (M, x_dot_dot)
+
+def create_fabric():
+	root = TransformTreeNode(parent=None, psi=None, fabric=None)
+	reach_node = TransformTreeNode(parent=root, psi=reach_task_map, fabric=reach_fabric)
+	for joint_idx in range(1, num_joints):
+		# We skip the very first joint, since we're assuming it can rotate through the full 360 degrees
+		upper_task_map = lambda foo : upper_joint_limits_task_map_template(foo, joint_idx)
+		lower_task_map = lambda bar : lower_joint_limits_task_map_template(bar, joint_idx)
+		upper_joint_node = TransformTreeNode(parent=root, psi=upper_task_map, fabric=joint_limits_fabric)
+		lower_joint_node = TransformTreeNode(parent=root, psi=lower_task_map, fabric=joint_limits_fabric)
+	return root
 
 fig, ax = visualization.make_display(axes_limits)
 visualization.maximize_plt_fig(fig)
