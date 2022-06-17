@@ -45,9 +45,12 @@ fabric_dt = 0.01
 dist_thresh = 0.01
 vel_thresh = 0.01
 fabric_running = False
-joint_range_frac = 0.8 # 1. is -pi to pi
+joint_range_frac = 0.1 # 1. is -pi to pi
 
 fig_num = 0
+
+largest_angle = 0
+largest_angle_idx = 0
 
 def make_rotation_matrix(theta):
 	mat = np.array([
@@ -130,11 +133,15 @@ def handle_keypress(event):
 			while True:
 				times = []
 				for _ in range(100):
-					print(joint_angles)
+					# print(joint_angles)
 					t0 = time.time()
 					joint_accel = root.solve(joint_angles, joints_vels)
 					times.append(time.time() - t0)
 					joint_angles = joint_angles + (joints_vels * fabric_dt)
+					global largest_angle, largest_angle_idx
+					if np.max(np.abs(joint_angles[1:])) > largest_angle:
+						largest_angle = np.max(np.abs(joint_angles[1:]))
+						largest_angle_idx = np.argmax(np.abs(joint_angles[1:]))+1
 					joints_vels = joints_vels + (joint_accel * fabric_dt)
 					record_endeffector_pose(joint_angles)
 					if np.linalg.norm(get_endeffector_pose(joint_angles) - goal_pos) < dist_thresh and np.linalg.norm(joints_vels) < vel_thresh: break
@@ -144,14 +151,15 @@ def handle_keypress(event):
 				# print(np.linalg.norm(get_endeffector_pose(joint_angles) - goal_pos))
 				# print(np.linalg.norm(joints_vels))
 				print("Average fabric update rate: %f ms" % (np.mean(np.array(times))*1000))
+				print("Largest angle: %f \t Index: %d \t Boundary: %f" % (largest_angle, largest_angle_idx, joint_range_frac * np.pi))
 				if np.linalg.norm(get_endeffector_pose(joint_angles) - goal_pos) < dist_thresh and np.linalg.norm(joints_vels) < vel_thresh:
 					print("Goal reached!")
 					fabric_running = False
 					break
-				if plt.waitforbuttonpress(0.1):
-					print("Goal not reached!")
-					fabric_running = False
-					break
+				# if plt.waitforbuttonpress(1):
+				# 	print("Goal not reached!")
+				# 	fabric_running = False
+				# 	break
 
 def handle_click(event):
 	global goal_pos, num_ik_steps, end_effector_path
@@ -190,40 +198,41 @@ def reach_fabric(x, x_dot):
 	M = (m_up - m_down) * np.exp(-1 * (alpha_m * np.linalg.norm(x))**2) * np.eye(2) + m_down * np.eye(2)
 	return (M, x_dot_dot)
 
-def upper_joint_limits_task_map_template(theta, joint_idx):
-	upper_limit = joint_range_frac * np.pi
-	return np.array([upper_limit - theta[joint_idx]]) * 180. / np.pi
-
-def lower_joint_limits_task_map_template(theta, joint_idx):
-	lower_limit = -joint_range_frac * np.pi
-	return np.array([theta[joint_idx] - lower_limit]) * 180. / np.pi
-
 def joint_limits_fabric(x, x_dot):
+	# id_print(x)
 	a1, a2, a3, a4 = 0.4, 0.2, 20., 5.
 	l = 0.25
 	s = (x_dot < 0).astype(float)
 	M = np.array([s * l / x])
 	psi = lambda theta : (a1 / theta**2) + a2 * log1pexp(-a3 * (theta - a4))
 	dx = jacrev(psi)(x).reshape(1) # For some reason, dx is a 1x1 array. This is needed to fix the shape.
-	# Can't compute this derivative with automatic differentiation, since you get catastrophic cancellation!
-	# See:
-	# https://jax.readthedocs.io/en/latest/notebooks/Custom_derivative_rules_for_Python_code.html#numerical-stability
-	# Instead, compute manually with wolfram alpha:
-	# https://www.wolframalpha.com/input?i=derivative+of+%28a%2Fx%5E2%29+%2B+b*log%28exp%28-c*%28x-d%29%29%2B1%29+with+respect+to+x
-	# dpsi = lambda theta : ((-2*a1) / theta**3) - (a2 * a3 / (1 + np.exp(a3 * (theta - a4))))
-	# dx = dpsi(x)
-	x_dot_dot = M @ dx
+	x_dot_dot = -s * np.linalg.norm(x_dot)**2 * dx
 	return (M, x_dot_dot)
+
+def upper_joint_limits_task_map_template(theta, joint_idx):
+	upper_limit = joint_range_frac * np.pi
+	# id_print(joint_idx)
+	# id_print(upper_limit - theta[joint_idx])
+	return np.array([upper_limit - theta[joint_idx]])
+
+def lower_joint_limits_task_map_template(theta, joint_idx):
+	lower_limit = -joint_range_frac * np.pi
+	# id_print(joint_idx)
+	# id_print(theta[joint_idx] - lower_limit)
+	return np.array([theta[joint_idx] - lower_limit])
 
 def create_fabric():
 	root = TransformTreeNode(parent=None, psi=None, fabric=None)
 	reach_node = TransformTreeNode(parent=root, psi=reach_task_map, fabric=reach_fabric)
+	# We skip the very first joint, since we're assuming it can rotate through the full 360 degrees
 	for joint_idx in range(1, num_joints):
-		# We skip the very first joint, since we're assuming it can rotate through the full 360 degrees
-		upper_task_map = lambda foo : upper_joint_limits_task_map_template(foo, joint_idx)
-		lower_task_map = lambda bar : lower_joint_limits_task_map_template(bar, joint_idx)
-		upper_joint_node = TransformTreeNode(parent=root, psi=upper_task_map, fabric=joint_limits_fabric)
-		lower_joint_node = TransformTreeNode(parent=root, psi=lower_task_map, fabric=joint_limits_fabric)
+		# Python is weird about binding values to lambdas. This works, because default initializations are
+		# computed at creation time!
+		# See: https://stackoverflow.com/questions/10452770/python-lambdas-binding-to-local-values
+		upper_task_map = lambda theta, joint_idx=joint_idx : upper_joint_limits_task_map_template(theta, joint_idx)
+		lower_task_map = lambda theta, joint_idx=joint_idx : lower_joint_limits_task_map_template(theta, joint_idx)
+		TransformTreeNode(parent=root, psi=upper_task_map, fabric=joint_limits_fabric)
+		TransformTreeNode(parent=root, psi=lower_task_map, fabric=joint_limits_fabric)
 	return root
 
 fig, ax = visualization.make_display(axes_limits)
