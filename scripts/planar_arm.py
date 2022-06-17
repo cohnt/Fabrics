@@ -45,7 +45,7 @@ fabric_dt = 0.01
 dist_thresh = 0.01
 vel_thresh = 0.01
 fabric_running = False
-joint_range_frac = 0.1 # 1. is -pi to pi
+joint_range_frac = 0.5 # 1. is -pi to pi
 
 fig_num = 0
 
