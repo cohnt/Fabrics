@@ -9,6 +9,7 @@ sys.path.append(".")  #
 import jax.numpy as np
 from jax import jacfwd, jacrev, grad
 from jax.experimental.host_callback import id_print
+from jax.lax import cond
 import matplotlib.pyplot as plt
 import time
 
@@ -45,7 +46,9 @@ fabric_dt = 0.01
 dist_thresh = 0.01
 vel_thresh = 0.01
 fabric_running = False
+
 joint_range_frac = 0.5 # 1. is -pi to pi
+nominal_configuration = np.zeros(num_joints)
 
 fig_num = 0
 
@@ -91,13 +94,13 @@ def update_display(ax):
 		arr = np.array(end_effector_path)[::end_effector_path_downsample]
 		ax.plot(arr[:,0], arr[:,1], color="blue")
 
+	plt.draw()
+
 	if fabric_running:
 		plt.savefig("fig%04d.png" % fig_num)
 		fig_num += 1
 	# else:
 	# 	plt.draw()
-
-	plt.draw()
 
 def handle_keypress(event):
 	global selected_joint, joint_angles, joints_vels, fabric_running
@@ -151,7 +154,7 @@ def handle_keypress(event):
 				# print(np.linalg.norm(get_endeffector_pose(joint_angles) - goal_pos))
 				# print(np.linalg.norm(joints_vels))
 				print("Average fabric update rate: %f ms" % (np.mean(np.array(times))*1000))
-				print("Largest angle: %f \t Index: %d \t Boundary: %f" % (largest_angle, largest_angle_idx, joint_range_frac * np.pi))
+				# print("Largest angle: %f \t Index: %d \t Boundary: %f" % (largest_angle, largest_angle_idx, joint_range_frac * np.pi))
 				if np.linalg.norm(get_endeffector_pose(joint_angles) - goal_pos) < dist_thresh and np.linalg.norm(joints_vels) < vel_thresh:
 					print("Goal reached!")
 					fabric_running = False
@@ -198,17 +201,6 @@ def reach_fabric(x, x_dot):
 	M = (m_up - m_down) * np.exp(-1 * (alpha_m * np.linalg.norm(x))**2) * np.eye(2) + m_down * np.eye(2)
 	return (M, x_dot_dot)
 
-def joint_limits_fabric(x, x_dot):
-	# id_print(x)
-	a1, a2, a3, a4 = 0.4, 0.2, 20., 5.
-	l = 0.25
-	s = (x_dot < 0).astype(float)
-	M = np.array([s * l / x])
-	psi = lambda theta : (a1 / theta**2) + a2 * log1pexp(-a3 * (theta - a4))
-	dx = jacrev(psi)(x).reshape(1) # For some reason, dx is a 1x1 array. This is needed to fix the shape.
-	x_dot_dot = -s * np.linalg.norm(x_dot)**2 * dx
-	return (M, x_dot_dot)
-
 def upper_joint_limits_task_map_template(theta, joint_idx):
 	upper_limit = joint_range_frac * np.pi
 	# id_print(joint_idx)
@@ -221,6 +213,33 @@ def lower_joint_limits_task_map_template(theta, joint_idx):
 	# id_print(theta[joint_idx] - lower_limit)
 	return np.array([theta[joint_idx] - lower_limit])
 
+def joint_limits_fabric(x, x_dot):
+	# id_print(x)
+	a1, a2, a3, a4 = 0.4, 0.2, 20., 5.
+	l = 0.25
+	s = (x_dot < 0).astype(float)
+	M = np.array([s * l / x])
+	psi = lambda theta : (a1 / theta**2) + a2 * log1pexp(-a3 * (theta - a4))
+	dx = jacrev(psi)(x).reshape(1) # For some reason, dx is a 1x1 array. This is needed to fix the shape.
+	x_dot_dot = -s * np.linalg.norm(x_dot)**2 * dx
+	return (M, x_dot_dot)
+
+def nominal_configuration_task_map_template(theta, joint_idx):
+	#
+	return np.array([theta[joint_idx] - nominal_configuration[joint_idx]])
+
+def nominal_configuration_fabric(x, x_dot):
+	lambda_dc = 0.0025
+	k = 50.
+	alpha_psi = 10.
+	beta = 2.5
+	eps = 0.0000001
+	psi = lambda theta : k * (np.linalg.norm(theta) + (1 / alpha_psi) * log1pexp(-2 * alpha_psi * np.linalg.norm(theta)))
+	dx = cond(np.abs(x[0]) < eps, lambda x : np.zeros(1), lambda x : jacfwd(psi)(x).reshape(1), x)
+	x_dot_dot = -1 * dx - beta * x_dot
+	M = lambda_dc * np.eye(1)
+	return (M, x_dot_dot)
+
 def create_fabric():
 	root = TransformTreeNode(parent=None, psi=None, fabric=None)
 	reach_node = TransformTreeNode(parent=root, psi=reach_task_map, fabric=reach_fabric)
@@ -231,8 +250,10 @@ def create_fabric():
 		# See: https://stackoverflow.com/questions/10452770/python-lambdas-binding-to-local-values
 		upper_task_map = lambda theta, joint_idx=joint_idx : upper_joint_limits_task_map_template(theta, joint_idx)
 		lower_task_map = lambda theta, joint_idx=joint_idx : lower_joint_limits_task_map_template(theta, joint_idx)
+		nominal_task_map = lambda theta, joint_idx=joint_idx : nominal_configuration_task_map_template(theta, joint_idx)
 		TransformTreeNode(parent=root, psi=upper_task_map, fabric=joint_limits_fabric)
 		TransformTreeNode(parent=root, psi=lower_task_map, fabric=joint_limits_fabric)
+		TransformTreeNode(parent=root, psi=nominal_task_map, fabric=nominal_configuration_fabric)
 	return root
 
 fig, ax = visualization.make_display(axes_limits)
