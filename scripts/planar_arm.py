@@ -49,6 +49,7 @@ fabric_running = False
 
 joint_range_frac = 0.5 # 1. is -pi to pi
 nominal_configuration = np.zeros(num_joints)
+nominal_l2 = True # If True, penalize deviation from the nominal config with l2 norm, if False, l1 norm.
 
 fig_num = 0
 
@@ -95,6 +96,7 @@ def update_display(ax):
 		ax.plot(arr[:,0], arr[:,1], color="blue")
 
 	plt.draw()
+	plt.pause(0.1)
 
 	if fabric_running:
 		plt.savefig("fig%04d.png" % fig_num)
@@ -224,9 +226,13 @@ def joint_limits_fabric(x, x_dot):
 	x_dot_dot = -s * np.linalg.norm(x_dot)**2 * dx
 	return (M, x_dot_dot)
 
-def nominal_configuration_task_map_template(theta, joint_idx):
+def nominal_configuration_task_map_template_l1(theta, joint_idx):
 	#
 	return np.array([theta[joint_idx] - nominal_configuration[joint_idx]])
+
+def nominal_configuration_task_map_l2(theta):
+	#
+	return theta - nominal_configuration
 
 def nominal_configuration_fabric(x, x_dot):
 	lambda_dc = 0.0025
@@ -235,14 +241,14 @@ def nominal_configuration_fabric(x, x_dot):
 	beta = 2.5
 	eps = 0.0000001
 	psi = lambda theta : k * (np.linalg.norm(theta) + (1 / alpha_psi) * log1pexp(-2 * alpha_psi * np.linalg.norm(theta)))
-	dx = cond(np.abs(x[0]) < eps, lambda x : np.zeros(1), lambda x : jacfwd(psi)(x).reshape(1), x)
+	dx = cond(np.linalg.norm(x) < eps, lambda x : np.zeros(x.shape), lambda x : jacfwd(psi)(x).flatten(), x)
 	x_dot_dot = -1 * dx - beta * x_dot
-	M = lambda_dc * np.eye(1)
+	M = lambda_dc * np.eye(x.shape[0])
 	return (M, x_dot_dot)
 
 def create_fabric():
 	root = TransformTreeNode(parent=None, psi=None, fabric=None)
-	reach_node = TransformTreeNode(parent=root, psi=reach_task_map, fabric=reach_fabric)
+	TransformTreeNode(parent=root, psi=reach_task_map, fabric=reach_fabric)
 	# We skip the very first joint, since we're assuming it can rotate through the full 360 degrees
 	for joint_idx in range(1, num_joints):
 		# Python is weird about binding values to lambdas. This works, because default initializations are
@@ -250,10 +256,13 @@ def create_fabric():
 		# See: https://stackoverflow.com/questions/10452770/python-lambdas-binding-to-local-values
 		upper_task_map = lambda theta, joint_idx=joint_idx : upper_joint_limits_task_map_template(theta, joint_idx)
 		lower_task_map = lambda theta, joint_idx=joint_idx : lower_joint_limits_task_map_template(theta, joint_idx)
-		nominal_task_map = lambda theta, joint_idx=joint_idx : nominal_configuration_task_map_template(theta, joint_idx)
 		TransformTreeNode(parent=root, psi=upper_task_map, fabric=joint_limits_fabric)
 		TransformTreeNode(parent=root, psi=lower_task_map, fabric=joint_limits_fabric)
-		TransformTreeNode(parent=root, psi=nominal_task_map, fabric=nominal_configuration_fabric)
+		if not nominal_l2:
+			nominal_task_map = lambda theta, joint_idx=joint_idx : nominal_configuration_task_map_template_l1(theta, joint_idx)
+			TransformTreeNode(parent=root, psi=nominal_task_map, fabric=nominal_configuration_fabric)
+	if nominal_l2:
+		TransformTreeNode(parent=root, psi=nominal_configuration_task_map_l2, fabric=nominal_configuration_fabric)
 	return root
 
 fig, ax = visualization.make_display(axes_limits)
