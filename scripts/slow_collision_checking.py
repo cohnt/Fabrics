@@ -46,6 +46,7 @@ fabric_dt = 0.01
 dist_thresh = 0.01
 vel_thresh = 0.01
 fabric_running = False
+eps = 0.00001
 
 joint_range_frac = 0.5 # 1. is -pi to pi
 nominal_configuration = np.zeros(num_joints)
@@ -137,7 +138,7 @@ def handle_keypress(event):
 			while True:
 				times = []
 				for _ in range(100):
-					# print(joint_angles)
+					print(joint_angles)
 					t0 = time.time()
 					joint_accel = root.solve(joint_angles, joints_vels)
 					times.append(time.time() - t0)
@@ -154,7 +155,7 @@ def handle_keypress(event):
 				print("Drawing time: %f ms" % ((time.time() - t0)*1000))
 				# print(np.linalg.norm(get_endeffector_pose(joint_angles) - goal_pos))
 				# print(np.linalg.norm(joints_vels))
-				print("Average fabric update rate: %f ms" % (np.mean(np.array(times))*1000))
+				print("Average fabric update rate: %f ms" % (np.mean(np.array(times)[1:])*1000))
 				# print("Largest angle: %f \t Index: %d \t Boundary: %f" % (largest_angle, largest_angle_idx, joint_range_frac * np.pi))
 				if np.linalg.norm(get_endeffector_pose(joint_angles) - goal_pos) < dist_thresh and np.linalg.norm(joints_vels) < vel_thresh:
 					print("Goal reached!")
@@ -248,6 +249,88 @@ def nominal_configuration_fabric(x, x_dot):
 	M = lambda_dc * np.eye(x.shape[0])
 	return (M, x_dot_dot)
 
+def line_point_distance(line, point):
+	# https://stackoverflow.com/a/2824596
+	# http://paulbourke.net/geometry/pointlineplane/
+	# line is a 2x2 numpy array, where line[0] and line[1] are the endpoints
+	x1, y1 = line[0]
+	x2, y2 = line[1]
+	x3, y3 = point
+	u = ((x3 - x1) * (x2 - x1) + (y3 - y1) * (y2 - y1)) / np.linalg.norm(line[1] - line[0])
+	x = x1 + u * (x2 - x1)
+	y = y1 + u * (y2 - y1)
+	# if 0 <= u and u <= 1:
+	# 	return np.min(np.array([np.linalg.norm(line_point - point) for line_point in line]))
+	# else:
+	# 	return np.linalg.norm(np.array([x, y]) - point)
+	return cond((0 <= u) & (u <= 1),
+	            lambda line, point, x, y : np.linalg.norm(np.array([x, y]) - point),
+	            lambda line, point, x, y : np.min(np.array([np.linalg.norm(line_point - point) for line_point in line])),
+	            line, point, x, y)
+
+def line_line_intersect(line1, line2):
+	# https://stackoverflow.com/a/2824596
+	# http://paulbourke.net/geometry/pointlineplane
+	# line is a 2x2 numpy array, where line[0] and line[1] are the endpoints
+	x1, y1 = line1[0]
+	x2, y2 = line1[1]
+	x3, y3 = line2[0]
+	x4, y4 = line2[1]
+	numer_a = (x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)
+	numer_b = (x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)
+	denom = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1)
+	# if np.abs(denom) < eps:
+	# 	return np.abs(numer_a) < eps and np.abs(numer_b) < eps
+	# else:
+	# 	return 0 <= numer_a / denom and numer_a / denom <= 1 and 0 <= numer_b / denom and numer_b / denom <= 1
+	return cond(np.abs(denom) < eps,
+	            # lambda numer_a, numer_b, denom : (np.abs(numer_a) < eps) & (np.abs(numer_b) < eps),
+	            lambda numer_a, numer_b, denom : False, # The lines being the same is an annoying edge case -- easier to just ignore it
+	            lambda numer_a, numer_b, denom : (0 <= numer_a / denom) & (numer_a / denom <= 1) & (0 <= numer_b / denom) & (numer_b / denom <= 1),
+	            numer_a, numer_b, denom)
+
+def line_line_distance(line1, line2):
+	# https://stackoverflow.com/a/2824596
+	# line is a 2x2 numpy array, where line[0] and line[1] are the endpoints
+	# if line_line_intersect(line1, line2):
+	# 	return 0
+	# else:
+	# 	return np.min(np.array([
+	# 		line_point_distance(line1, line2[0]),
+	# 		line_point_distance(line1, line2[1]),
+	# 		line_point_distance(line2, line1[0]),
+	# 		line_point_distance(line2, line1[1])
+	# 	]))
+	return cond(line_line_intersect(line1, line2),
+	            lambda line1, line2 : 0.,
+	            lambda line1, line2 : np.min(np.array([
+	                line_point_distance(line1, line2[0]),
+	                line_point_distance(line1, line2[1]),
+	                line_point_distance(line2, line1[0]),
+	                line_point_distance(line2, line1[1])
+	            ])),
+	            line1, line2)
+
+def self_collision_task_map_template(theta, joint_idx_1, joint_idx_2):
+	p0 = apply_fk(np.zeros(2), joint_idx_1+1, theta)
+	p1 = apply_fk(np.array([arm_link_lengths[joint_idx_1],0]), joint_idx_1+1, theta)
+	p2 = apply_fk(np.zeros(2), joint_idx_2+1, theta)
+	p3 = apply_fk(np.array([arm_link_lengths[joint_idx_2],0]), joint_idx_2+1, theta)
+	line1 = np.array([p0, p1])
+	line2 = np.array([p2, p3])
+	return np.array([line_line_distance(line1, line2)])
+
+def self_collision_fabric(x, x_dot):
+	# id_print(x)
+	k_beta = 20.
+	alpha_beta = 1.
+	s = (x_dot < 0).astype(float)
+	M = np.diag(k_beta * np.divide(s, x**2))
+	psi = lambda theta : np.divide(alpha_beta, (2 * (theta**8)))
+	dx = jacfwd(psi)(x).reshape(1) # For some reason, dx is a 1x1 array. This is needed to fix the shape.
+	x_dot_dot = -s * x_dot**2 * dx
+	return (M, x_dot_dot)
+
 def create_fabric():
 	root = TransformTreeNode(parent=None, psi=None, fabric=None)
 	TransformTreeNode(parent=root, psi=reach_task_map, fabric=reach_fabric)
@@ -265,6 +348,13 @@ def create_fabric():
 			TransformTreeNode(parent=root, psi=nominal_task_map, fabric=nominal_configuration_fabric)
 	if nominal_l2:
 		TransformTreeNode(parent=root, psi=nominal_configuration_task_map_l2, fabric=nominal_configuration_fabric)
+	for joint_idx_1 in range(1, num_joints):
+		# Skip the first link because its length is zero
+		for joint_idx_2 in range(joint_idx_1+2, num_joints):
+			# Don't start at the next link (which will always collide at the connecting joint)
+			# Instead start two links down the line
+			self_collision_task_map = lambda theta, joint_idx_1=joint_idx_1, joint_idx_2=joint_idx_2 : self_collision_task_map_template(theta, joint_idx_1, joint_idx_2)
+			TransformTreeNode(parent=root, psi=self_collision_task_map, fabric=self_collision_fabric)
 	return root
 
 fig, ax = visualization.make_display(axes_limits)
