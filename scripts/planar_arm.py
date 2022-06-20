@@ -42,6 +42,13 @@ end_effector_link_idx = num_links - 1
 end_effector_path = []
 end_effector_path_downsample = 25
 
+obs_origins = np.array([
+	[2, 1.5],
+	[3, -2],
+	[-1, 1]
+], dtype=float)
+obs_rs = [1., 0.75, 0.25]
+
 fabric_dt = 0.01
 dist_thresh = 0.01
 vel_thresh = 0.01
@@ -74,9 +81,16 @@ def apply_fk(point, frame_idx, joint_angles):
 		point = apply_transformation(make_rotation_matrix(joint_angles[i]), fk_translations[i], point)
 	return point
 
+def draw_obstacles(ax):
+	for obs_origin, obs_r in zip(obs_origins, obs_rs):
+		obs_element = plt.Circle(tuple(obs_origin), obs_r, color='black')
+		ax.add_patch(obs_element)
+
 def update_display(ax):
 	global end_effector_pos, end_effector_path, fig_num
 	visualization.reset_display(ax, axes_limits)
+
+	draw_obstacles(ax)
 
 	for i in range(0, num_links):
 		point1 = apply_fk(np.array([0,0]), i, joint_angles)
@@ -248,6 +262,21 @@ def nominal_configuration_fabric(x, x_dot):
 	M = lambda_dc * np.eye(x.shape[0])
 	return (M, x_dot_dot)
 
+def obstacle_avoidance_task_map_template(theta, joint_idx):
+	link_endpoint_local = np.array([arm_link_lengths[joint_idx],0])
+	link_endpoint = apply_fk(link_endpoint_local, joint_idx, theta)
+	return np.array([np.linalg.norm(link_endpoint - obs_origin) / obs_r - 1.0 for obs_origin, obs_r in zip(obs_origins, obs_rs)])
+
+def obstacle_avoidance_fabric(x, x_dot):
+	k_beta = 0.01
+	alpha_beta = 1.
+	s = (x_dot < 0).astype(float)
+	M = np.diag(k_beta * np.divide(s, x**2))
+	psi = lambda theta : np.divide(alpha_beta, (2 * (theta**8)))
+	dx = jacfwd(psi)(x)
+	x_dot_dot = -s * x_dot**2 @ dx
+	return (M, x_dot_dot)
+
 def create_fabric():
 	root = TransformTreeNode(parent=None, psi=None, fabric=None)
 	TransformTreeNode(parent=root, psi=reach_task_map, fabric=reach_fabric)
@@ -263,6 +292,9 @@ def create_fabric():
 		if not nominal_l2:
 			nominal_task_map = lambda theta, joint_idx=joint_idx : nominal_configuration_task_map_template_l1(theta, joint_idx)
 			TransformTreeNode(parent=root, psi=nominal_task_map, fabric=nominal_configuration_fabric)
+		if len(obs_origins) > 0:
+			obstacle_avoidance_task_map = lambda theta, joint_idx=joint_idx : obstacle_avoidance_task_map_template(theta, joint_idx)
+			TransformTreeNode(parent=root, psi=obstacle_avoidance_task_map, fabric=obstacle_avoidance_fabric)
 	if nominal_l2:
 		TransformTreeNode(parent=root, psi=nominal_configuration_task_map_l2, fabric=nominal_configuration_fabric)
 	return root
